@@ -1,0 +1,16 @@
+---
+- name: Testing this ansible tower thing
+  connection: local
+  gather_facts: false
+  hosts: localhost
+
+  vars:
+    - foo: "bar"
+
+  tasks:
+    - name: Who in the what?
+      command: echo {{ foo }}
+      register: result
+
+    - name: For the lulz
+      debug: msg="{{ result.stdout }}"
