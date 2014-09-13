@@ -1,0 +1,103 @@
+### Create a proxy server running:
+###  - squid
+###  - tweaked SSH settings
+###  - iodine server
+---
+### spin up RAX cloud server
+- name: Create remote proxy server
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+  - name: Create instance
+    rax: name="squid_proxy"
+         flavor="performance1-1"
+         image="06cbc0a2-a906-4e6a-8ed7-bd7c952c9f81"
+         count=1
+         group="disposable_proxy"
+         wait=yes
+         credentials="~/.raxpub"
+    register: rax
+
+  - name: Add new host
+    add_host: hostname="squid_proxy"
+              ansible_ssh_host="{{ item.rax_accessipv4 }}"
+              ansible_ssh_pass="{{ item.rax_adminpass }}"
+              groupname="disposable_proxy"
+    with_items: rax.success
+    when: rax.action == "create"
+
+### Shared proxy server prep
+- name: Shared proxy server prep
+  hosts: "disposable_proxy"
+  connection: ssh
+  gather_facts: false
+
+  tasks:
+  - name: Update apt cache
+    apt: update_cache=yes
+
+  - name: Install squid and iodine packages
+    apt: name="{{ item }}"
+         state=latest
+    with_items:
+      - "squid"
+      - "iodine"
+
+- name: Setup squid
+  hosts: "disposable_proxy"
+  connection: ssh
+  gather_facts: false
+
+  tasks: 
+  - name: Uncomment default lines
+    lineinfile: state=present
+                regexp="^#{{ item }}$"
+                line="{{ item }}"
+                dest=/etc/squid/squid.conf
+    with_items:
+      - "acl password proxy_auth REQUIRED"
+      - "auth_param basic program /usr/lib/squid/pam_auth"
+      - "auth_param basic children 5"
+      - "auth_param basic realm Squid proxy-caching web server"
+      - "auth_param basic credentialsttl 2 hours"
+
+  - name: Allow password acl
+    lineinfile: state=present
+                insertafter="^http_access allow localhost$"
+                line="http_access allow password"
+                dest=/etc/squid/squid.conf 
+
+  - name: Setup PAM config
+    lineinfile: state=present
+                create=yes
+                line="{{ item }}"
+                insertafter=EOF
+                dest=/etc/squid/squid.conf
+    with_items:
+      - "auth required /lib/x86_64-linux-gnu/security/pam_unix.so"
+      - "account required /lib/x86_64-linux-gnu/security/pam_unix.so"
+
+  - name: Bounce squid
+    service: name=squid state=restarted
+
+### Configure and start iodine
+- name: Start iodine
+  hosts: "disposable_proxy"
+  connection: ssh
+  gather_facts: false
+
+  tasks:
+    - name: Start iodine
+      shell: "echo iodineintheory | iodined -f 192.168.0.1 intheory.io &"
+
+### Configure and restart SSH
+- name: Setup SSH
+  connection: ssh
+  hosts: "disposable_proxy"
+  gather_facts: false
+
+  tasks:
+    - name: Configure and stuff
+      command: echo "Should do something here..."
